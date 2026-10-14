@@ -1,0 +1,770 @@
+---
+title: "APIs: Lecture Notes"
+format: html
+---
+
+# Lecture purpose
+
+This lecture introduces APIs as a way to collect data programmatically from the web.
+
+The core teaching arc is:
+
+> ask for one thing → understand the request → retrieve the data → make it tidy → package the task in a function → repeat it with `map()` → vary two inputs with `map2()` → combine
+
+The business setting is Music to Scrape. The website shows one weekly chart at a time, but we want to build a dataset containing many weekly charts.
+
+The lecture should feel cumulative. Each new piece of code should solve a problem created by the previous step.
+
+## Timing
+
+| Time | Section |
+|---|---|
+| 0–8 min | Business problem and API intuition |
+| 8–22 min | Build one API request |
+| 22–34 min | Inspect and tidy the response |
+| 34–48 min | Turn the request into a function |
+| 48–63 min | Repeat the function with `map()` |
+| 63–75 min | Vary week and year with `expand_grid()` and `map2()` |
+| 75–80 min | Recap and close |
+
+# 0–8 min: Start with the problem
+
+## Set up the business task
+
+Open the Music to Scrape weekly chart in the browser.
+
+Use Week 42 of 2023 as the example.
+
+Ask:
+
+- What can we learn from this page?
+- What if we wanted one other week?
+- What if we wanted every week from 2022 to 2026?
+
+The key contrast:
+
+> The website gives us one view at a time. We want to build our own dataset.
+
+Do not start with a technical definition of an API.
+
+Start from the problem: the data exist, but they are spread across many separate weekly views.
+
+## API intuition
+
+Explain that there are two common ways code can retrieve data from the web:
+
+1. work from the webpage itself, which is the basic idea behind web scraping;
+2. use an API, where the provider has created an interface specifically for software.
+
+For this subject, we use the API route.
+
+A useful line:
+
+> Instead of opening a webpage and reading what is displayed, our code can ask the service directly for a particular set of data.
+
+Music to Scrape returns that data in JSON.
+
+We have seen JSON before, so today the emphasis is not on learning JSON from scratch. It is on getting JSON from another system into R in a reproducible way.
+
+## Libraries
+
+```{r}
+library(httr2)
+library(tidyverse)
+```
+
+Briefly:
+
+- `httr2` builds and sends API requests;
+- `tidyverse` handles the returned data once it is in R.
+
+# 8–22 min: Build one API request
+
+## Start with the documentation
+
+Open:
+
+<https://api.music-to-scrape.org/docs>
+
+Do this live rather than explaining the endpoint from memory.
+
+Point out:
+
+- APIs come with documentation;
+- documentation tells us what we can ask for;
+- documentation tells us how to structure the request.
+
+Find the top-tracks endpoint.
+
+For this example, we need:
+
+- endpoint: `/charts/top-tracks`
+- `week`
+- `year`
+- `limit`
+
+Emphasise:
+
+> These parameter names come from this API's documentation. They are not universal R commands.
+
+## Build the URL conceptually
+
+Show the complete URL:
+
+```text
+https://api.music-to-scrape.org/charts/top-tracks?week=42&year=2023&limit=100
+```
+
+Break it into:
+
+- base URL;
+- endpoint;
+- query parameters.
+
+Optional quick question:
+
+> Which part would change if I wanted Week 43?
+
+Open the URL in the browser.
+
+Students should see JSON rather than the normal chart webpage.
+
+Use this to reinforce:
+
+> The website and API expose related information in different forms. The webpage is designed for people. The API response is designed for software.
+
+## Recreate the request in R
+
+Start only with the base URL:
+
+```{r}
+request("https://api.music-to-scrape.org")
+```
+
+Explain:
+
+> At this point we have described where we want to send the request, but not what we want.
+
+Add the endpoint:
+
+```{r}
+request("https://api.music-to-scrape.org") |>
+  req_url_path_append(
+    "charts",
+    "top-tracks"
+  )
+```
+
+Then add the query:
+
+```{r}
+request("https://api.music-to-scrape.org") |>
+  req_url_path_append(
+    "charts",
+    "top-tracks"
+  ) |>
+  req_url_query(
+    week = 42,
+    year = 2023,
+    limit = 100
+  )
+```
+
+Pause here.
+
+Important distinction:
+
+> We have built a request. We have not sent it yet.
+
+Now send it:
+
+```{r}
+response <-
+  request("https://api.music-to-scrape.org") |>
+  req_url_path_append(
+    "charts",
+    "top-tracks"
+  ) |>
+  req_url_query(
+    week = 42,
+    year = 2023,
+    limit = 100
+  ) |>
+  req_perform()
+```
+
+Inspect:
+
+```{r}
+response
+```
+
+Do not spend long on HTTP internals.
+
+Point out only:
+
+- status `200` means the request succeeded;
+- `400`-type errors usually mean a problem with the request;
+- `500`-type errors usually mean something failed on the server side.
+
+# 22–34 min: Work with the response
+
+## Extract the JSON body
+
+The response contains information about the exchange and the body we actually want.
+
+Extract the body:
+
+```{r}
+tracks_raw <-
+  response |>
+  resp_body_json()
+```
+
+Ask:
+
+> Is this already the dataframe we want?
+
+No. It is an R object created from the JSON response.
+
+Inspect the top-level structure:
+
+```{r}
+names(tracks_raw)
+```
+
+Then inspect only a few chart entries:
+
+```{r}
+tracks_raw$chart[1:5]
+```
+
+Use this to point out that:
+
+- `chart` contains the individual track records;
+- it is currently a list;
+- each element corresponds to one track.
+
+## Turn the records into a dataframe
+
+```{r}
+tracks <-
+  tracks_raw$chart |>
+  bind_rows() |>
+  select(
+    name,
+    artist,
+    plays
+  )
+```
+
+Inspect:
+
+```{r}
+tracks
+```
+
+Teaching point:
+
+> At this point, the API-specific part of the job is largely finished. We now have an ordinary dataframe.
+
+Ask:
+
+> What is still wrong with this if our goal is five years of weekly charts?
+
+Answer: it contains one week.
+
+That creates the motivation for the function.
+
+# 34–48 min: Make the request reusable
+
+## Identify what changes
+
+Put the existing request on screen.
+
+Ask:
+
+> If I wanted Week 43 instead of Week 42, what would change?
+
+Only `week`.
+
+Ask:
+
+> If I wanted a different year?
+
+`year`.
+
+Everything else is repeated.
+
+Use this to introduce the function:
+
+> A function gives a name to a set of instructions we want to reuse, while allowing some inputs to change.
+
+For this task:
+
+```text
+week + year -> one weekly chart dataframe
+```
+
+We want to give the function:
+
+- a week;
+- a year.
+
+We want it to return:
+
+- one tidy weekly chart dataframe.
+
+## Build the function
+
+```{r}
+get_top_tracks <- function(week, year) {
+
+  tracks_raw <-
+    request("https://api.music-to-scrape.org") |>
+    req_url_path_append(
+      "charts",
+      "top-tracks"
+    ) |>
+    req_url_query(
+      week = week,
+      year = year,
+      limit = 100
+    ) |>
+    req_perform() |>
+    resp_body_json()
+
+  tracks_raw$chart |>
+    bind_rows() |>
+    select(
+      name,
+      artist,
+      plays
+    ) |>
+    mutate(
+      week = week,
+      year = year
+    )
+}
+```
+
+Slow down here.
+
+Explain:
+
+```r
+get_top_tracks <- function(week, year) {
+```
+
+as:
+
+- `get_top_tracks` is the name;
+- `week` and `year` are the inputs;
+- everything inside `{}` is the set of instructions that runs when the function is called.
+
+Then make the substitution concrete:
+
+```{r}
+get_top_tracks(
+  week = 42,
+  year = 2023
+)
+```
+
+Say:
+
+> R uses `42` wherever the function refers to `week`, and `2023` wherever it refers to `year`.
+
+For teaching clarity, keep named arguments whenever calling this function.
+
+Show two more calls:
+
+```{r}
+get_top_tracks(
+  week = 43,
+  year = 2023
+)
+
+get_top_tracks(
+  week = 44,
+  year = 2023
+)
+```
+
+Explain the final `mutate()`:
+
+```r
+mutate(
+  week = week,
+  year = year
+)
+```
+
+On the left:
+
+- new dataframe columns.
+
+On the right:
+
+- the values supplied to the function.
+
+This matters because once many weeks are combined, each row still records where it came from.
+
+Transition:
+
+> Calling the function three times is fine. Calling it 52 times by hand is not.
+
+# 48–63 min: Repeat the function with `map()`
+
+The textbook can spend longer on loops.
+
+In the lecture, mention the basic iteration idea but move quickly to `map()`.
+
+## Set up the weeks
+
+```{r}
+weeks_to_collect <- 1:52
+```
+
+Explain:
+
+> We now have the collection of values we want R to work through.
+
+If useful, briefly demonstrate iteration mechanically:
+
+```{r}
+for (iWeek in weeks_to_collect) {
+  print(iWeek)
+}
+```
+
+Do not develop the full list-storage loop unless the class needs it.
+
+The point of showing this is only:
+
+- `iWeek` is the temporary iterator;
+- it takes one value at a time;
+- the code inside `{}` runs once for each value.
+
+Then say:
+
+> `map()` gives us a compact way to express that same repeated task when what we want is to apply a function to many input values.
+
+## Use `map()`
+
+```{r}
+results <-
+  map(
+    weeks_to_collect,
+    get_top_tracks,
+    year = 2023
+  )
+```
+
+This needs careful explanation.
+
+Recall:
+
+```r
+get_top_tracks <- function(week, year) {
+```
+
+Then explain the `map()` call in words:
+
+> For each value in `weeks_to_collect`, use that value as `week`, keep `year = 2023`, and run `get_top_tracks()`.
+
+Expand the first few calls verbally or on screen:
+
+```r
+get_top_tracks(
+  week = 1,
+  year = 2023
+)
+
+get_top_tracks(
+  week = 2,
+  year = 2023
+)
+
+get_top_tracks(
+  week = 3,
+  year = 2023
+)
+```
+
+Key rule:
+
+> The values from the first input to `map()` are passed to the first argument of the function being mapped. Named arguments that follow, such as `year = 2023`, stay fixed.
+
+Inspect one result:
+
+```{r}
+results[[1]]
+```
+
+Explain that `map()` returns a list because each function call returns a dataframe.
+
+## Combine the weekly dataframes
+
+```{r}
+tracks_2023 <-
+  results |>
+  list_rbind()
+```
+
+Or show the compact version:
+
+```{r}
+tracks_2023 <-
+  map(
+    weeks_to_collect,
+    get_top_tracks,
+    year = 2023
+  ) |>
+  list_rbind()
+```
+
+Teaching point:
+
+> `map()` performs the repeated calls. `list_rbind()` stacks the returned dataframes into one dataframe.
+
+At this point we can collect one full year.
+
+Now create the next problem:
+
+> Our actual task needs multiple years as well. We now need both `week` and `year` to change.
+
+# 63–75 min: Vary week and year
+
+## Build the combinations first
+
+Do not jump straight to five years.
+
+Start with a small example:
+
+```{r}
+week_years <-
+  expand_grid(
+    week = 42:44,
+    year = 2023:2024
+  )
+```
+
+Inspect:
+
+```{r}
+week_years
+```
+
+Explain `expand_grid()`:
+
+> It creates every combination of the values we provide.
+
+Three weeks × two years = six rows.
+
+The useful interpretation:
+
+> Each row describes one API request we want to make.
+
+Walk through the first few rows.
+
+## Introduce `map2()`
+
+We now have two changing inputs.
+
+Use:
+
+```{r}
+results <-
+  map2(
+    week_years$week,
+    week_years$year,
+    get_top_tracks
+  )
+```
+
+Explain slowly:
+
+- `map()` worked through one vector;
+- `map2()` works through two vectors together;
+- first week pairs with first year;
+- second week pairs with second year;
+- and so on.
+
+Recall the function signature:
+
+```r
+get_top_tracks <- function(week, year) {
+```
+
+Then explicitly map the arguments:
+
+- `week_years$week` feeds `week`;
+- `week_years$year` feeds `year`.
+
+Read the code aloud:
+
+> Move through the week and year columns together, and run `get_top_tracks()` once for each matching pair.
+
+Show the equivalent first few calls:
+
+```r
+get_top_tracks(
+  week = 42,
+  year = 2023
+)
+
+get_top_tracks(
+  week = 42,
+  year = 2024
+)
+
+get_top_tracks(
+  week = 43,
+  year = 2023
+)
+```
+
+Then combine:
+
+```{r}
+tracks_small <-
+  results |>
+  list_rbind()
+```
+
+## Scale to the full task
+
+Now change only the inputs:
+
+```{r}
+week_years <-
+  expand_grid(
+    week = 1:52,
+    year = 2022:2026
+  )
+```
+
+Then:
+
+```{r}
+tracks <-
+  map2(
+    week_years$week,
+    week_years$year,
+    get_top_tracks
+  ) |>
+  list_rbind()
+```
+
+Optional:
+
+```{r}
+tracks <-
+  tracks |>
+  arrange(
+    desc(year),
+    desc(week)
+  )
+```
+
+Pause here.
+
+This is the substantive endpoint of the lecture.
+
+Do not add another analytical section just to manufacture an insight from the synthetic data.
+
+# 75–80 min: Close
+
+Return to the original problem.
+
+We started with a website that showed one weekly chart at a time.
+
+By the end of the lecture, we have:
+
+1. read API documentation;
+2. built and sent one request;
+3. extracted JSON and made a dataframe;
+4. turned that workflow into a function;
+5. repeated the function across 52 weeks with `map()`;
+6. created combinations of weeks and years with `expand_grid()`;
+7. varied both inputs with `map2()`;
+8. combined all returned dataframes into one dataset.
+
+The main takeaway:
+
+> The website gave us one view at a time. The API let us build our own dataset.
+
+A broader takeaway:
+
+> Once we understand how one request works, functions and iteration let us scale that single request into a reproducible data-collection workflow.
+
+# Optional checkpoints if the class is quiet
+
+Use these only if useful.
+
+## Checkpoint 1
+
+After building the URL:
+
+> If I change `week = 42` to `week = 43`, what part of the request changes?
+
+## Checkpoint 2
+
+After `resp_body_json()`:
+
+> Why are we inspecting the returned object before calling `bind_rows()`?
+
+Expected answer: JSON can be nested; we need to find the component containing the observations we want.
+
+## Checkpoint 3
+
+Before the function:
+
+> Which values should become function inputs, and which parts should stay fixed?
+
+Expected answer: `week` and `year` vary; endpoint, base URL, `limit`, extraction, and cleaning stay fixed.
+
+## Checkpoint 4
+
+At `map()`:
+
+> Which value changes on every call? Which value stays fixed?
+
+Expected answer: `week` changes; `year = 2023` stays fixed.
+
+## Checkpoint 5
+
+At `map2()`:
+
+> Why can we no longer use the same `map()` call as before?
+
+Expected answer: two inputs now need to vary together.
+
+# If running short on time
+
+Cut in this order:
+
+1. status-code discussion;
+2. browser inspection of raw JSON;
+3. the brief `for` loop demonstration;
+4. the compact `tracks_2023 <- map(...) |> list_rbind()` repetition.
+
+Do not cut:
+
+- documentation;
+- request versus response distinction;
+- the function explainer;
+- the argument-passing explanation for `map()`;
+- the small `expand_grid()` example;
+- the argument-pairing explanation for `map2()`.
+
+# If running ahead
+
+Possible extensions:
+
+- ask students to predict the output of `expand_grid(week = 42:44, year = 2023:2024)` before running it;
+- ask them to rewrite the `map()` call for `year = 2024`;
+- ask what would happen if `get_top_tracks()` had been defined as `function(year, week)` instead;
+- briefly inspect `length(results)` after `map()`;
+- compare `nrow(week_years)` for the small and full examples.

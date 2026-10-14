@@ -1,0 +1,398 @@
+---
+title: "APIs"
+format: html
+---
+
+## Libraries
+
+We will use `httr2` to build and send API requests, and the `tidyverse` to work with the data that come back.
+
+```{r}
+library(httr2)
+library(tidyverse)
+
+url <- "https://api.music-to-scrape.org"
+```
+
+## From a Website to an API
+
+Music to Scrape website shows one weekly music chart at a time on its website.
+
+That is useful if we want to inspect one week. But suppose we want to collect charts across many weeks and years. Opening each page and copying the data manually would quickly become repetitive.
+
+An API gives our code another way to access the data. Instead of opening a webpage designed for a person to read, we can ask the API for a particular set of data and receive a structured response.
+
+We will start small: one weekly chart.
+
+## Build One Request
+
+The API documentation tells us that weekly chart data are available from the `charts/top-tracks` endpoint. We also need to provide a `week`, a `year`, and the number of tracks we want returned.
+
+We first create a request using the base URL:
+
+```{r}
+request(url)
+```
+
+We can then add the endpoint:
+
+```{r}
+request(url) |>
+  req_url_path_append(
+    "charts",
+    "top-tracks"
+  )
+```
+
+Finally, we add the details of the chart we want:
+
+```{r}
+request(url) |>
+  req_url_path_append(
+    "charts",
+    "top-tracks"
+  ) |>
+  req_url_query(
+    week = 42,
+    year = 2023,
+    limit = 100
+  )
+```
+
+At this point we have built the request, but we have not sent it.
+
+`req_perform()` sends the request to the API:
+
+```{r}
+response <-
+  request(url) |>
+  req_url_path_append(
+    "charts",
+    "top-tracks"
+  ) |>
+  req_url_query(
+    week = 42,
+    year = 2023,
+    limit = 100
+  ) |>
+  req_perform()
+```
+
+We can inspect what came back:
+
+```{r}
+response
+```
+
+A status code of `200` tells us that the request succeeded.
+
+## Work with the Response
+
+The chart data are stored in the body of the response. Music to Scrape returns that body as JSON.
+
+We can convert the JSON response into R objects with `resp_body_json()`:
+
+```{r}
+tracks_raw <-
+  response |>
+  resp_body_json()
+```
+
+Before trying to turn the result into a dataframe, it is useful to inspect how it is organised:
+
+```{r}
+names(tracks_raw)
+```
+
+The individual track records are stored inside `chart`. We only need to inspect a few to understand the structure:
+
+```{r}
+tracks_raw$chart[1:5]
+```
+
+We can then combine those records into a dataframe:
+
+```{r}
+tracks <-
+  tracks_raw$chart |>
+  bind_rows() |>
+  select(
+    name,
+    artist,
+    plays
+  )
+```
+
+```{r}
+tracks
+```
+
+We now have one weekly chart in an ordinary dataframe.
+
+The remaining problem is scale: we do not want to rewrite the full request every time we want another week.
+
+## Make the Request Reusable
+
+A function lets us package a task that we want to reuse while allowing some inputs to change.
+
+For our task:
+
+```text
+week + year -> one weekly chart dataframe
+```
+
+The week and year should change. The API endpoint, request structure, and cleaning steps stay the same.
+
+We can put those repeated steps into a function:
+
+```{r}
+get_top_tracks <- function(week, year) {
+
+  tracks_raw <-
+    request("https://api.music-to-scrape.org") |>
+    req_url_path_append(
+      "charts",
+      "top-tracks"
+    ) |>
+    req_url_query(
+      week = week,
+      year = year,
+      limit = 100
+    ) |>
+    req_perform() |>
+    resp_body_json()
+
+  tracks_raw$chart |>
+    bind_rows() |>
+    select(
+      name,
+      artist,
+      plays
+    ) |>
+    mutate(
+      week = week,
+      year = year
+    )
+}
+```
+
+The first line:
+
+```r
+get_top_tracks <- function(week, year) {
+```
+
+defines a function called `get_top_tracks()` with two inputs: `week` and `year`.
+
+For example:
+
+```{r}
+get_top_tracks(
+  week = 42,
+  year = 2023
+)
+```
+
+R uses `42` wherever the function refers to `week` and `2023` wherever it refers to `year`.
+
+We can now retrieve other weeks without rewriting the full API workflow:
+
+```{r}
+get_top_tracks(
+  week = 43,
+  year = 2023
+)
+
+get_top_tracks(
+  week = 44,
+  year = 2023
+)
+```
+
+This is much better than copying and editing the original request. But we still would not want to write 52 separate function calls for a full year.
+
+## Repeat a Task
+
+Suppose we want every week from 2023:
+
+```{r}
+weeks_to_collect <- 1:52
+```
+
+The tidyverse function `map()` gives us a compact way to apply a function repeatedly:
+
+```{r}
+results <-
+  map(
+    weeks_to_collect,
+    get_top_tracks,
+    year = 2023
+  )
+```
+
+A useful way to read this is:
+
+> For each value in `weeks_to_collect`, use that value as `week`, keep `year = 2023`, and run `get_top_tracks()`.
+
+So `map()` is effectively doing:
+
+```r
+get_top_tracks(
+  week = 1,
+  year = 2023
+)
+
+get_top_tracks(
+  week = 2,
+  year = 2023
+)
+
+get_top_tracks(
+  week = 3,
+  year = 2023
+)
+
+# ...and so on
+```
+
+Each call returns a dataframe, so `map()` gives us a list of dataframes.
+
+We can inspect one of them:
+
+```{r}
+results[[1]]
+```
+
+Then combine all of the weekly dataframes:
+
+```{r}
+tracks_2023 <-
+  results |>
+  list_rbind()
+```
+
+`list_rbind()` stacks the dataframes on top of one another.
+
+We can also write the whole workflow more compactly:
+
+```{r}
+tracks_2023 <-
+  map(
+    weeks_to_collect,
+    get_top_tracks,
+    year = 2023
+  ) |>
+  list_rbind()
+```
+
+## Vary More Than One Input
+
+So far, `week` has changed while `year` has stayed fixed.
+
+To collect several years, both inputs need to change.
+
+We will first use a small example:
+
+```{r}
+week_years <-
+  expand_grid(
+    week = 42:44,
+    year = 2023:2024
+  )
+```
+
+```{r}
+week_years
+```
+
+`expand_grid()` creates every combination of the values we provide.
+
+Here we have three weeks and two years, so we get six week-year combinations. Each row describes one API request we want to make.
+
+Because two inputs now change together, we use `map2()`:
+
+```{r}
+results <-
+  map2(
+    week_years$week,
+    week_years$year,
+    get_top_tracks
+  )
+```
+
+`map2()` moves through two vectors together.
+
+Because our function is defined as:
+
+```r
+get_top_tracks <- function(week, year) {
+```
+
+the first vector supplies `week` and the second supplies `year`.
+
+The first few calls are therefore equivalent to:
+
+```r
+get_top_tracks(
+  week = 42,
+  year = 2023
+)
+
+get_top_tracks(
+  week = 42,
+  year = 2024
+)
+
+get_top_tracks(
+  week = 43,
+  year = 2023
+)
+```
+
+We can combine the returned dataframes in the same way as before:
+
+```{r}
+tracks_small <-
+  results |>
+  list_rbind()
+```
+
+## Scale Up
+
+Once the small example works, the full task uses exactly the same logic.
+
+First create all week-year combinations:
+
+```{r}
+week_years <-
+  expand_grid(
+    week = 1:52,
+    year = 2022:2026
+  )
+```
+
+Then collect one chart for each pair and combine the results:
+
+```{r}
+tracks <-
+  map2(
+    week_years$week,
+    week_years$year,
+    get_top_tracks
+  ) |>
+  list_rbind()
+```
+
+We have now turned a website that showed one weekly chart at a time into one dataframe containing weekly chart data across five years.
+
+## Key Ideas
+
+- An API lets code request structured data from another system.
+- API documentation tells us which endpoint and parameters to use.
+- `httr2` lets us build and send API requests from R.
+- A function packages a task that we want to reuse while allowing some inputs to change.
+- Iteration repeats the same task across many input values.
+- `map()` is useful when one input changes across calls.
+- `expand_grid()` creates combinations of input values.
+- `map2()` is useful when two inputs need to change together.
+- `list_rbind()` combines a list of dataframes into one dataframe.

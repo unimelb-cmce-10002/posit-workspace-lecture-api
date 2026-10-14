@@ -1,0 +1,202 @@
+---
+title: "APIs"
+format: html
+---
+
+# Libraries
+
+```{r}
+library(httr2)
+library(tidyverse)
+
+url <- "https://api.music-to-scrape.org"
+```
+
+# One Weekly Chart
+
+## Build the Request
+
+```{r}
+
+```
+
+## Send the Request
+
+```{r}
+
+```
+
+## Inspect the Response
+
+```{r}
+
+```
+
+# Work with the Response
+
+## Extract the JSON
+
+```{r}
+
+```
+
+## Inspect the Returned Object
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+## Make a Dataframe
+
+```{r}
+
+```
+
+# Make the Request Reusable
+
+## What Changes?
+
+For one weekly chart, we want:
+
+week + year -> one weekly chart dataframe
+
+## Build `get_top_tracks()`
+
+```{r}
+YOUR_CODE_HERE
+
+  tracks_raw <-
+    request("https://api.music-to-scrape.org") |>
+    req_url_path_append(
+      "charts",
+      "top-tracks"
+    ) |>
+    req_url_query(
+      week = YOUR_CODE_HERE,
+      year = YOUR_CODE_HERE,
+      limit = 100
+    ) |>
+    req_perform() |>
+    resp_body_json()
+
+  tracks_raw$chart |>
+    bind_rows() |>
+    select(
+      name,
+      artist,
+      plays
+    ) |>
+    mutate(
+      week = YOUR_CODE_HERE,
+      year = YOUR_CODE_HERE
+    )
+
+YOUR_CODE_HERE
+```
+
+## Try Different Weeks
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+# Repeat the Task
+
+```{r}
+weeks_to_collect <- 1:52
+```
+
+```{r}
+
+```
+
+## Inspect One Result
+
+```{r}
+
+```
+
+## Combine the Weekly Dataframes
+
+```{r}
+tracks_2023 <-
+  results |>
+  list_rbind()
+```
+
+# Vary More Than One Input
+
+## Build Week-Year Combinations
+
+```{r}
+week_years <-
+  expand_grid(
+    week = 42:44,
+    year = 2023:2024
+  )
+```
+
+```{r}
+week_years
+```
+
+## Repeat with `map2()`
+
+```{r}
+results <-
+  map2(
+    YOUR_CODE_HERE,
+    YOUR_CODE_HERE,
+    YOUR_CODE_HERE
+  )
+```
+
+## Combine the Results
+
+```{r}
+tracks_small <-
+  results |>
+  list_rbind()
+```
+
+# Scale Up
+
+## All Weeks and Years
+
+```{r}
+week_years <-
+  expand_grid(
+    week = 1:52,
+    year = 2022:2026
+  )
+```
+
+## Collect the Full Dataset
+
+```{r}
+tracks <-
+  map2(
+    YOUR_CODE_HERE,
+    YOUR_CODE_HERE,
+    YOUR_CODE_HERE
+  ) |>
+  list_rbind()
+```
+
+## Inspect the Final Dataset
+
+```{r}
+
+```
